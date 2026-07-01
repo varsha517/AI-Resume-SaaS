@@ -7,28 +7,36 @@ from sklearn.metrics.pairwise import cosine_similarity
 from reportlab.pdfgen import canvas
 from io import BytesIO
 
-# ================= UI CONFIG (SAAS STYLE) =================
-st.set_page_config(page_title="AI Resume SaaS", layout="wide")
+# ================= UI CONFIG =================
+
+st.set_page_config(
+    page_title="AI Resume SaaS",
+    layout="wide"
+)
 
 st.markdown("""
 <style>
-body {
+.main {
     background-color: #0f172a;
     color: white;
 }
-.block-container {
-    padding: 2rem;
+.stMetric {
+    background-color: #1e293b;
+    padding: 10px;
+    border-radius: 10px;
 }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🚀 AI Resume Intelligence SaaS")
-st.markdown("### Smart ATS + AI Analysis + Career Prediction System")
+st.markdown("### ATS Scoring • AI Matching • Career Prediction")
 
 # ================= MODEL =================
+
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # ================= DATA =================
+
 SKILLS_DB = [
     "python", "java", "c++", "sql", "machine learning",
     "deep learning", "nlp", "pandas", "numpy",
@@ -49,8 +57,9 @@ def extract_text(file):
     text = ""
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
-            if page.extract_text():
-                text += page.extract_text()
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + " "
     return text.lower()
 
 
@@ -65,17 +74,17 @@ def semantic_score(resume, jd):
 
 def predict_role(skills):
     best_role = "Unknown"
-    best_match = 0
+    best_score = 0
 
     for role, req_skills in JOB_ROLES.items():
         match = len(set(skills) & set(req_skills))
         score = match / len(req_skills)
 
-        if score > best_match:
-            best_match = score
+        if score > best_score:
+            best_score = score
             best_role = role
 
-    return best_role, round(best_match * 100, 2)
+    return best_role, round(best_score * 100, 2)
 
 
 def hire_probability(score, skills_count):
@@ -84,11 +93,13 @@ def hire_probability(score, skills_count):
 
 def gauge_chart(score):
     fig, ax = plt.subplots()
-    ax.pie([score, 100 - score],
-           colors=["#00ff99", "#1e293b"],
-           startangle=90,
-           wedgeprops={"width": 0.4})
-    ax.set_title("ATS Score Gauge")
+    ax.pie(
+        [score, 100 - score],
+        colors=["#22c55e", "#334155"],
+        startangle=90,
+        wedgeprops={"width": 0.4}
+    )
+    ax.set_title("ATS Score")
     st.pyplot(fig)
 
 
@@ -110,70 +121,59 @@ def generate_pdf(score, role, hire_prob, skills):
 
     for s in skills:
         c.drawString(120, y, f"- {s}")
-        y -= 20
+        y -= 15
 
     c.save()
     buffer.seek(0)
     return buffer
 
-
 # ================= SIDEBAR =================
+
 st.sidebar.title("⚙ Controls")
 mode = st.sidebar.radio("Mode", ["Single Resume", "Compare Resumes"])
 
-# ================= INPUT =================
+# ================= SINGLE MODE =================
 
 if mode == "Single Resume":
 
-    uploaded_file = st.file_uploader("Upload Resume", type=["pdf"])
+    uploaded_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
     job_desc = st.text_area("Paste Job Description")
 
-    if uploaded_file:
+    if uploaded_file and job_desc:
 
         resume_text = extract_text(uploaded_file)
         skills = extract_skills(resume_text)
 
         st.subheader("📄 Resume Preview")
-        st.text_area("", resume_text, height=200)
+        st.write(resume_text[:1200])
 
-        if job_desc:
+        score = semantic_score(resume_text, job_desc)
+        role, role_score = predict_role(skills)
+        hire_prob = hire_probability(score, len(skills))
 
-            score = semantic_score(resume_text, job_desc)
-            role, role_score = predict_role(skills)
-            hire_prob = hire_probability(score, len(skills))
+        col1, col2, col3 = st.columns(3)
+        col1.metric("ATS Score", f"{score}%")
+        col2.metric("Predicted Role", role)
+        col3.metric("Hire Probability", f"{hire_prob}%")
 
-            # METRICS
-            col1, col2, col3 = st.columns(3)
-            col1.metric("ATS Score", f"{score}%")
-            col2.metric("Predicted Role", role)
-            col3.metric("Hire Probability", f"{hire_prob}%")
+        gauge_chart(score)
 
-            # GAUGE
-            gauge_chart(score)
+        st.subheader("📊 Skills Found")
+        st.write(skills)
 
-            # CHART
-            st.subheader("📊 Skills Distribution")
+        st.subheader("💡 Insights")
+        st.write(f"✔ Best Role Fit: {role}")
+        st.write(f"✔ Match Strength: {role_score}%")
+        st.write(f"✔ Hire Probability: {hire_prob}%")
 
-            fig, ax = plt.subplots()
-            ax.bar(["Skills Found", "Expected"], [len(skills), 10])
-            st.pyplot(fig)
+        pdf = generate_pdf(score, role, hire_prob, skills)
 
-            # INSIGHTS
-            st.subheader("💡 Insights")
-
-            st.write(f"✔ Best Role Fit: {role}")
-            st.write(f"✔ Match Strength: {role_score}%")
-            st.write(f"✔ Hire Probability: {hire_prob}%")
-
-            # DOWNLOAD
-            pdf = generate_pdf(score, role, hire_prob, skills)
-
-            st.download_button(
-                "📥 Download Report",
-                pdf,
-                file_name="resume_report.pdf",
-                mime="application/pdf"
-            )
+        st.download_button(
+            "📥 Download Report",
+            pdf,
+            file_name="resume_report.pdf",
+            mime="application/pdf"
+        )
 
 # ================= COMPARISON MODE =================
 
@@ -194,15 +194,12 @@ else:
         s2 = semantic_score(r2, job_desc)
 
         col1, col2 = st.columns(2)
-
         col1.metric("Resume 1 Score", f"{s1}%")
         col2.metric("Resume 2 Score", f"{s2}%")
 
         winner = "Resume 1" if s1 > s2 else "Resume 2"
-
         st.success(f"🏆 Better Resume: {winner}")
 
-        # comparison chart
         fig, ax = plt.subplots()
         ax.bar(["Resume 1", "Resume 2"], [s1, s2])
         st.pyplot(fig)
